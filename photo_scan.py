@@ -18,11 +18,10 @@ output_json = "photo_folder.json"
 # Folders to skip during scanning
 skip_folders = [
     "TECHTOOLS", ".Applications", ".Trash", "com.apple", ".spotlight-V100", ".fseventsd",
-    ".documentRevisions-V100", "$Recyle.Bin", "System Volume Information", "Windows",
-    "Program Files", "Program Files (x86)", "AppData", "Temp", "ProgramData", "_MACOSX",
-    ".cache", ".config", ".local", "Library", "node_modules", "venv", ".venv", ".git",
-    ".svn", ".hg", ".OneDriveTemp", "OneDrive - Personal", "Recycle.Bin", ".thumbnails",
-    "lost+found", "$WinREAgent"
+    ".documentRevisions-V100", "$Recyle.Bin",  "Program Files", "Program Files (x86)", 
+    "AppData", "Temp", "ProgramData", "_MACOSX", ".cache", ".config", ".local", 
+    "Library", "node_modules", "venv", ".venv", ".git", ".svn", ".hg", ".OneDriveTemp",
+    "OneDrive - Personal", "Recycle.Bin", ".thumbnails", "lost+found", "$WinREAgent"
 ]
 
 # Extensions considered "Junk"
