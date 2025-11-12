@@ -4,3 +4,15 @@ venv/
 env/
 ENV/
 
+# Python cache / build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.DS_Store
+
+# IDE settings
+.vscode/
+.idea/
+
