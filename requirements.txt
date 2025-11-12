@@ -1,3 +1,23 @@
-Pillow==10.2.0
-tkinterdnd2==0.3.0
-python-dateutil>=2.8.2
+# --- Core Python build tools ---
+setuptools>=70.0.0
+wheel>=0.44.0
+cmake>=3.29.0
+
+# --- Image and media processing ---
+Pillow>=10.0.0
+numpy>=1.26.0
+
+# --- GUI ---
+tkinterdnd2>=0.3.0  # optional, safe to skip on some systems
+
+# --- Face recognition stack ---
+dlib>=19.24.4
+face-recognition-models>=0.3.0
+face-recognition>=1.3.0
+
+# --- Project modules (your own tools) ---
+# These are your local imports like photo_scan, cross_pic_organizer, scanned_album, clean_upload, recognition
+# No pip install needed unless you publish them as separate packages.
+
+# --- Optional utilities ---
+requests>=2.31.0
