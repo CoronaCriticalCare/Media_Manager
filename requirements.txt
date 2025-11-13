@@ -1,7 +1,6 @@
 # --- Core Python build tools ---
 setuptools>=70.0.0
 wheel>=0.44.0
-cmake>=3.29.0
 
 # --- Image and media processing ---
 Pillow>=10.0.0
