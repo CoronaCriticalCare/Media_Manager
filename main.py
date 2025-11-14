@@ -1,11 +1,5 @@
 """
 Cross-platform main GUI for Media Tools (Linux, macOS, Windows)
-
-Features:
-- Robust drag & drop handling (tkinterdnd2) with many path formats
-- Click-to-select fallback when DnD fails
-- Thread-safe logging and progress updates
-- Hooks into photo_scan, cross_pic_organizer, scanned_album, clean_upload
 """
 
 import os
@@ -134,14 +128,82 @@ class PhotoToolsApp(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
             tk.Label(self.control_panel, text="No JSON loaded.", bg="white").pack(pady=5)
             tk.Button(self.control_panel, text="Load JSON", command=self.load_json).pack(pady=5)
             tk.Button(self.control_panel, text="Run Clean Upload", command=self.run_upload).pack(pady=5)
+        
         elif tab_name == "Media Discovery":
             tk.Button(self.control_panel, text="Scan Media", command=self.scan_media).pack(pady=5)
+        
         elif tab_name == "Media Organizer":
             tk.Button(self.control_panel, text="Organize Media", command=self.organize_media).pack(pady=5)
-            tk.Button(self.control_panel, text="Target Mode", command=self.target_mode).pack(pady=5)
+            tk.Button(self.control_panel, text="Face Match Mode", command=self.face_match_mode).pack(pady=5)
+        
         elif tab_name == "Scanned Albums":
             tk.Button(self.control_panel, text="Load Scanned", command=self.load_scanned).pack(pady=5)
             tk.Button(self.control_panel, text="Move Albums", command=self.move_albums).pack(pady=5)
+
+
+    def face_match_mode(self):
+        """Ask for target photos, source, and output, then run matching."""
+        targets = filedialog.askopenfilenames(
+            title="Select target face photos",
+            filetypes=[("Images", "*.jpg *.jpeg *.png *.bmp *.webp *.tiff")]
+        )
+
+        if not targets:
+            self._log_console("[FaceMatch] No target photos selected.")
+            return
+        
+        source = filedialog.askdirectory(title="Select folder to scan")
+        if not source:
+            self._log_console("[FaceMatch] No source folder selected.")
+            return
+        
+        dest = filedialog.askdirectory(title="Select destination for matched output.")
+        if not dest:
+            self._log_console("[FaceMatch] No destination selected.")
+            return
+        
+        matched_folder = os.path.join(dest, "Matched")
+        os.makedirs(matched_folder, exist_ok=True)
+
+        self._log_console("[FaceMatch] Starting face rfecognition...")
+
+        threading.Thread(
+            target=self._face_match_thread,
+            args=(list(targets), source, matched_folder),
+            daemon=True
+        ).start()
+
+    def _face_match_thread(self, targets, source_folder, matched_folder, threshold=0.6):
+        """Thread: use recognition.py cleanly."""
+        try:
+            # Load target encodings
+            encs = recognition.build_target_encodings(
+                targets,
+                model="hog",
+                log=self._log_console
+            )
+
+            if not encs:
+                self._log_console("[FaceMatch] No valid targets faces found.")
+                return
+            
+            # Run scan
+            recognition.scan_and_copy_matches(
+                encs,
+                source_folder,
+                matched_folder,
+                threshold=threshold,
+                model="hog",
+                log=self._log_console,
+                progress_callback=self.update_progress
+            )
+
+            self.update_progress(100)
+            self._log_console("[FaceMatch] Completed.")
+
+        except Exception as e:
+            self._log_console(f"[FaceMatch] Fatal error: {e}")
+
 
     # -------- Events / Helpers --------
     def _on_tab_change(self, event):
@@ -258,54 +320,67 @@ class PhotoToolsApp(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
     def _log_console(self, message):
         """Thread-safe append to console."""
         def append():
-            self.console.insert(tk.END, message + "\n")
-            self.console.see(tk.END)
+            try:
+                self.console.insert(tk.END, message + "\n")
+                self.console.see(tk.END)
+            except Exception:
+                # if console widget isn't ready, print to stdout as a fallback
+                print(message)
         try:
             self.after(0, append)
         except Exception:
-            # fallback if UI is not ready
             print(message)
-
+                  
     def update_progress(self, percent):
         """Thread-safe update of progress bar & label."""
         def update():
             try:
-                self.progress_var.set(percent)
-                self.progress_label.config(text=f"{percent:.1f}%")
+                p = max(0.0, min(100.0, float(percent)))
+                self.progress_var.set(p)
+                self.progress_label.config(text=f"{p:.1f}%")
                 self.progress_frame.update_idletasks()
             except Exception as e:
-                self._log_console(f"[Progress Error] {e}")
-        try:
-            # percent may be a float or int
-            self.after(0, update)
-        except Exception:
-            pass
+                # Log safely via after to prevent recursion
+                try:
+                    self.after(0, lambda: self._log_console(f"[Progress Error] {e}"))
+                except Exception:
+                    print(f"[Progress Error] {e}")
+            
+            try:
+                # percent may be a float or int
+                self.after(0, update)
+            except Exception:
+                # Fallback
+                try:
+                    update()
+                except Exception:
+                    pass
 
-    # -------- Actions wired to controls --------
+    # ------------------- Actions wired to controls -------------------
     def load_json(self):
-        self._log_console("Load JSON clicked. (not implemented)")
+        self._log_console("Load JSON")
 
     def run_upload(self):
         source_folder = self.dropped_paths.get("Clean Upload")
         if not source_folder:
             self._log_console("[Clean Upload] No folder dropped.")
             return
-
+        
         dest = filedialog.askdirectory(title="Select destination folder")
         if not dest:
             self._log_console("[Clean Upload] No destination selected.")
             return
-
+        
         self._log_console(f"[Clean Upload] Copying from: {source_folder} -> {dest}")
         threading.Thread(target=self._run_upload_thread, args=(source_folder, dest), daemon=True).start()
-
+    
     def _run_upload_thread(self, source_folder, dest):
         try:
             clean_upload.batch_clean_upload([source_folder], dest, log=self._log_console)
             self._log_console("[Clean Upload] Upload complete.")
         except Exception as e:
             self._log_console(f"[Clean Upload] Error: {e}")
-
+    
     def scan_media(self):
         folder = self.dropped_paths.get("Media Discovery")
         if not folder:
@@ -313,10 +388,10 @@ class PhotoToolsApp(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
             return
         self._log_console(f"Scanning media in: {folder}")
         threading.Thread(target=self._scan_media_thread, args=(folder,), daemon=True).start()
-
+    
     def _scan_media_thread(self, folder):
         try:
-            # photo_scan.run_photo_scan supports log and progress_callback if implemented
+            # photo_scan.run_photo_scan supports log and progress_callback
             photo_scan.run_photo_scan(folder, log=self._log_console, progress_callback=self.update_progress)
             self.update_progress(100)
             self._log_console("[Media Discovery] Scan finished.")
@@ -328,21 +403,21 @@ class PhotoToolsApp(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
         self.after(0, self._collect_organize_inputs)
 
     def _collect_organize_inputs(self):
-        json_path = filedialog.askopenfilename(title="Select media JSON file.", filetypes=[("JSON files", ".json")])
+        json_path = filedialog.askopenfilename(title="Select media JSON file", filetypes=[("JSON files", ".json")])
         if not json_path:
             self._log_console("[Media Organizer] No JSON selected.")
             return
-
+        
         base_path = filedialog.askdirectory(title="Select destination base folder.")
         if not base_path:
             self._log_console("[Media Organizer] No destination folder selected.")
             return
-
-        folder_name = askstring("Organized Album", "Enter a name for the organized folder (e.g., 'Family_Album'):")
+        
+        folder_name = askstring("Organized Album", "Enter a name for the organized folder (e.g., 'Family_ALbum'):")
         if not folder_name:
             self._log_console("[Media Organizer] Folder name required.")
             return
-
+        
         threading.Thread(target=self._organize_media_thread, args=(json_path, base_path, folder_name), daemon=True).start()
 
     def _organize_media_thread(self, json_path, base_path, folder_name):
@@ -370,11 +445,11 @@ class PhotoToolsApp(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
         tags = [t.strip() for t in (tags_input or "").split(",") if t.strip()]
 
         date_start = askstring("Start Date", "Enter start date (e.g., 8-4-25 or Aug 4 2025):")
-        date_end = askstring("End Date", "Enter end date (e.g., 8-9-25 or Aug 9 2025):")
+        date_end = askstring("End Date", "Enter end date (e.g., 8-9-25 or AUg 9 2025):")
         if not date_start or not date_end:
             self._log_console("[Scanned Albums] Start and end dates are required.")
             return
-
+        
         self._log_console(f"[Scanned Albums] Filtering by date: {date_start} to {date_end}")
         threading.Thread(
             target=scanned_album.scan_scanned_photos,
@@ -384,158 +459,8 @@ class PhotoToolsApp(TkinterDnD.Tk if DND_AVAILABLE else tk.Tk):
         ).start()
 
     def move_albums(self):
-        self._log_console("Moving scanned albums... (not implemented here)")
+        self._log_console("Moving scanned albums...")
 
-    def target_mode(self):
-        """Prompt user for target images, source folder, and destination, then start matching thread."""
-        # Ask for targert images
-        targets = filedialog.askopenfilenames(
-            title="Select target face photos",
-            filetypes=[("Images", "*.jpg *.jpeg *.png * .webp * .bmp * .tiff")]
-        )
-
-        if not targets:
-            self._log_console("[Face Match] No target images selected.")
-            return
-        
-        # Ask for source folder
-        source_folder = filedialog.askdirectory(title="Select source media folder.")
-        if not source_folder:
-            self._log_console("[Face Match] No source folder selected.")
-            return
-        
-        # Ask destination base
-        dest = filedialog.askdirectory(title="Select destination for Matched folder.")
-        if not dest:
-            self._log_console("[Face Match] No destination selected.")
-            return
-        
-        matched_folder = os.path.join(dest, "Matched")
-        os.makedirs(matched_folder, exist_ok=True)
-
-        self._log_console("[Face Match] Starting recognition...")
-        threading.Thread(
-            target=self._face_match_thread,
-            args=(list(targets), source_folder, matched_folder),
-            daemon=True
-        ).start()
-
-    def _face_match_thread(self, targets, source_folder, matched_folder, threshold=0.6, model="hog"):
-        """
-        Worker thread: try to use `recognition` module if available, otherwise run a local face_recognition-based scan.
-        Reports progress and logs via self.update_progress and self._log_console.
-        """
-        try:
-            # Prefer supplied recognition module if it exposes helpful functions
-            if "recognition" in globals():
-                # recognition should provide: build_target_encodings(target_paths, model, log)
-                # and scan_and_copy_matches(target_encs, source_folder, matched_folder, threshold, model, log, progess_callback)
-                try:
-                    target_encs = recognition.build_target_encodings(targets, model=model, log=self._log_console)
-                    if not target_encs:
-                        self._log_console("[Face Match] No valid faces in target set (recognition).")
-                        return
-                    
-                    recognition.scan_and_copy_matches(
-                        target_encs,
-                        source_folder,
-                        matched_folder,
-                        threshold=threshold,
-                        model=model,
-                        log=self._log_console,
-                        progress_callback=self.update_progress
-                    )
-                    self.update_progress(100)
-                    return
-                except Exception as e:
-                    # Fall back to local implementation if recognition module fails
-                    self._log_console(f"[Face Match] recogntion module failed, falling back: {e}")
-
-                # FALLBACK: use face_recognition directly
-                try:
-                    import face_recognition
-                except Exception as e:
-                    self._log_console(f"[FaceMatch] face_recognition not available: {e}")
-                    return
-                
-                # Load target encodings
-                target_encs = []
-                for t in targets:
-                    try:
-                        img = face_recognition.load_image_file(t)
-                        boxes = face_recognition.face_locations(img, model=model)
-                        encs = face_recognition.face_encodings(img, known_face_locations=boxes)
-                        if encs:
-                            target_encs.append(encs[0])
-                            self._log_console(f"[FaceMatch] Loaded target: {t}")
-                        else:
-                            self._log_console(f"[FaceMatch] No face found in target: {t}")
-                    except Exception as e:
-                        self._log_console(f"[FaceMatch] Error loading target {t}: {e}")
-
-                if not target_encs:
-                    self._log_console("[FaceMatch] No valid target faces found.")
-                    return
-                
-
-                # Gather image files
-                image_files = []
-                for root, dirs, files in os.walk(source_folder):
-                    for f in files:
-                        if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff")):
-                            image_files.append(os.path.join(root, f))
-
-                total = len(image_files) or 1
-                import shutil
-
-                for idx, p in enumerate(image_files):
-                    try:
-                        img = face_recognition.load_image_file(p)
-                        boxes = face_recognition.face_locations(img, model=model)
-                        encs = face_recognition.face_encodings(img, known_face_locations=boxes)
-
-                        matched = False
-                        for e in encs:
-                            # compare to each target encoding
-                            distances = face_recognition.face_distance(target_encs, e)
-                            for d in distances:
-                                if d <= threshold:
-                                    dst = os.path.join(matched_folder, os.path.basename(p))
-                                    # avoid overwriting same filename collisions
-                                    base, ext = os.path.slitext(os.path.basename(p))
-                                    final_dst = dst
-                                    counter = 1
-                                    while os.path.exists(final_dst):
-                                        final_dst = os.path.join(matched_folder, f"{base}_{counter}{ext}")
-                                        counter += 1
-                                    shutil.copy2(p, final_dst)
-                                    self._log_console(f"[FaceMatch] MATCH: {p} -> {final_dst} (distance={d:.4f})")
-                                    matched = True
-                                    break
-                            if matched:
-                                break
-
-                    except Exception as ex:
-                        self._log_console(f"[FaceMatch] Error processing {p}: {ex}")
-
-                    # update GUI progess safely
-                    pct = ((idx + 1) / total) * 100
-                    try:
-                        # ensure percent is within 0..100
-                        pct = max(0.0, min(100.0, pct))
-                        self.update_progress(pct)
-                    except Exception:
-                        pass
-
-
-                self.update_progress(100)
-                self._log_console(f"[FaceMatch] Completed scanning.")
-
-        except Exception as e:
-            self._log_console(f"[FaceMatch] Thread Error: {e}")
-            
-
-# ---- main ----
 if __name__ == "__main__":
     app = PhotoToolsApp()
     app.mainloop()
