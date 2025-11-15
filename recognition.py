@@ -11,7 +11,7 @@ def load_face_embedding(image_path: str, model="hog"):
     boxes = face_recognition.face_locations(img, model=model)
     if not boxes:
         return None, 0
-    
+
     encodings = face_recognition.face_encodings(img, known_face_locations=boxes)
     return encodings[0], len(encodings)
 
@@ -21,7 +21,7 @@ def compute_distance(encA, encB):
 def is_match(encA, encB, threshold=0.6):
     return compute_distance(encA, encB) <= threshold
 
-def build_target_encodings(target_paths, model="hog", log=lambda m: None):   
+def build_target_encodings(target_paths, model="hog", log=lambda m: None):
     """Load all target faces into a list of embeddings."""
     encs = []
     for p in target_paths:
@@ -35,55 +35,61 @@ def build_target_encodings(target_paths, model="hog", log=lambda m: None):
         except Exception as e:
             log(f"[FaceMatch] Error loading target {p}: {e}")
     return encs
-    
+
 def scan_and_copy_matches(target_encs, source_folder, matched_folder,
-                          threshold=0.6, model="hog", log=lambda m: None, progress_callback=None):
+                          threshold=0.6, model="hog",
+                          log=lambda m: None, progress_callback=None):
     """Scan folder for images containing any of target faces. Copy matches to matched_folder."""
+    
     # Gather all image files
     image_files = []
     for root, dirs, files in os.walk(source_folder):
         for f in files:
-            if f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp:", ".tiff")):
+            if f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff")):
                 image_files.append(os.path.join(root, f))
 
     total_files = len(image_files)
     if total_files == 0:
-        log("[FaceMatch] No imnages found in source older.")
+        log("[FaceMatch] No images found in source folder.")
         return
 
-    for idx, img_path in enumerate(img_path):
+    for idx, img_path in enumerate(image_files):
+        found_match = False
+
         try:
             img = face_recognition.load_image_file(img_path)
             boxes = face_recognition.face_locations(img, model=model)
-            encs = face_recognition.face_encodings(img, known_face_locations=boxes)
+            if not boxes:
+                log(f"[FaceMatch] No face detected in: {os.path.basename(img_path)}")
+            else:
+                encs = face_recognition.face_encodings(img, known_face_locations=boxes)
 
-            for e in encs:
-                for t in target_encs:
-                    if is_match(t, e, threshold):
-                        # Build safe destination name (prevent overwritting)
-                        base = os.path.splitext(os.path.basename(img_path))[0]
-                        ext = os.path.splitext(img_path)[1]
-                        dst = os.path.join(matched_folder, base + ext)
+                for e in encs:
+                    for t in target_encs:
+                        if is_match(t, e, threshold):
+                            # Safe destination filename
+                            base, ext = os.path.splitext(os.path.basename(img_path))
+                            dst = os.path.join(matched_folder, base + ext)
 
-                        counter = 1
-                        while os.path.exists(dst):
-                            dst = os.path.join(matched_folder, f"{base}_{counter}{ext}")
-                            counter += 1
+                            counter = 1
+                            while os.path.exists(dst):
+                                dst = os.path.join(matched_folder, f"{base}_{counter}{ext}")
+                                counter += 1
 
-                        shutil.copy2(img_path, dst)
-                        log(f"[FaceMatch] Match -> {img_path}")
-                        raise StopIteration # Break out of loops
-                    
-        except StopIteration:
-            pass
+                            shutil.copy2(img_path, dst)
+                            log(f"[FaceMatch] Match -> {img_path}")
+                            found_match = True
+                            break
+
+                    if found_match:
+                        break
+
         except Exception as exc:
             log(f"[FaceMatch] Error processing {img_path}: {exc}")
 
-        # update GUI progress safely
+        # Update GUI progress
         if progress_callback:
             pct = ((idx + 1) / total_files) * 100
-            pct = max(0.0, min(100.0, pct))
-            progress_callback(pct)
+            progress_callback(max(0.0, min(100.0, pct)))
 
     log("[FaceMatch] Completed scanning.")
-    
